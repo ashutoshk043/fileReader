@@ -6,6 +6,7 @@ const fs = require('fs')
 let uniqueSuffix = ''
 let XLSX = require("xlsx");
 const { default: mongoose } = require('mongoose');
+const { timeStamp } = require('console');
 
 const uploadFolder = path.join(__dirname, '../../upload')
 
@@ -68,7 +69,7 @@ router.post('/readfiles', upload.single('file'), async (req, res) => {
     });
 
     // Define a schema with no strict validation
-    const dynamicSchema = new mongoose.Schema({}, { strict: false });
+    const dynamicSchema = new mongoose.Schema({}, { strict: false }, {timeStamp:true});
 
     // Create the model using `mongoose.model`
     const dynamicModel = mongoose.model(fileName, dynamicSchema);
