@@ -36,53 +36,79 @@ router.get('/', async(req, res)=>{
 router.post('/readfiles', upload.single('file'), async (req, res) => {
   try {
     let fileName = uniqueSuffix; // Assuming uniqueSuffix is defined elsewhere
-    let workbook = XLSX.readFile(`${uploadFolder}/${fileName}`);
-    let allHeaders = [];
-    let mappedrows = []
-    
-    // Get the first sheet name
-    const sheetName = workbook.SheetNames[0];
-    
-    // Get the sheet data
+    const filePath = path.join(uploadFolder, fileName);
+
+    console.log('Reading file from:', filePath);
+
+    // Read the workbook
+    let workbook = XLSX.readFile(filePath);
+
+    // Get sheet names and log them
+    const sheetNames = workbook.SheetNames;
+    console.log('Sheet Names:', sheetNames);
+
+    if (sheetNames.length === 0) {
+      throw new Error('No sheets found in the workbook.');
+    }
+
+    // Access the first sheet
+    const sheetName = sheetNames[0];
+    console.log('Sheet Name:', sheetName);
+
     const worksheet = workbook.Sheets[sheetName];
-    
+    if (!worksheet) {
+      throw new Error(`Sheet ${sheetName} not found in the workbook.`);
+    }
+
     // Convert the sheet data to JSON
     const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+    console.log('Rows:', rows.length);
 
-    
-    // Print each row
+    // Process rows
+    let allHeaders = [];
+    let mappedRows = [];
     rows.forEach((row, index) => {
-      if(row.length != 0){
+      if (row.length !== 0) {
         if (index === 0) {
-          // The first row contains the headers
           allHeaders = row;
         } else {
-          // Create an object for each row
           let mappedRow = {};
           for (let i = 0; i < allHeaders.length; i++) {
             mappedRow[allHeaders[i]] = row[i];
           }
-          // Push the mapped row into the array
-          mappedrows.push(mappedRow);
+          mappedRows.push(mappedRow);
         }
       }
     });
 
-    // Define a schema with no strict validation
-    const dynamicSchema = new mongoose.Schema({}, { strict: false }, {timeStamp:true});
-
-    // Create the model using `mongoose.model`
+    console.log('Mapped rows total:', mappedRows.length);
+    // Define schema, create model, and insert data
+    const dynamicSchema = new mongoose.Schema({}, { strict: false, timestamps: true });
     const dynamicModel = mongoose.model(fileName, dynamicSchema);
 
-    // console.log(mappedrows, "dynamicSchemadynamicSchema")
+    const chunkSize = 999;
+    let batch = [];
+    let totalInserted = 0;
 
-    // Use `insertMany` directly on the model
-    let insertedRecords = await dynamicModel.insertMany(mappedrows);
+    for (let i = 0; i < mappedRows.length; i++) {
+      batch.push(mappedRows[i]);
 
-    // console.log(insertedRecords, "llHeaders");
+      if (batch.length === chunkSize || i === mappedRows.length - 1) {
+        console.log(`Inserting batch of size: ${batch.length}`);
+        try {
+          await dynamicModel.insertMany(batch);
+          totalInserted += batch.length;
+          console.log(`Successfully inserted ${batch.length} records.`);
+          batch = []; // Clear batch
+        } catch (error) {
+          console.error('Error inserting batch:', error.message);
+        }
+      }
+    }
 
-    res.send({ status: true, message: fileName, rows:insertedRecords});
+    res.send({ status: true, message: `Successfully processed ${totalInserted} records.` });
   } catch (error) {
+    console.error('Error:', error.message);
     res.send({ status: false, message: error.message });
   }
 });
