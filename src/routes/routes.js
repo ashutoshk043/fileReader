@@ -7,6 +7,7 @@ let uniqueSuffix = ''
 let XLSX = require("xlsx");
 const { default: mongoose } = require('mongoose');
 const { timeStamp } = require('console');
+const {processLargeExcelFile} = require('../controller/processLargeFiles')
 
 const uploadFolder = path.join(__dirname, '../../upload')
 
@@ -130,87 +131,10 @@ router.post('/readfiles', upload.single('file'), async (req, res) => {
 });
 
 
-// router.post('/readfiles', upload.single('file'), async (req, res) => {
-//   try {
-//     let fileName = uniqueSuffix; // Assuming uniqueSuffix is defined elsewhere
-//     const filePath = path.join(uploadFolder, fileName);
-
-//     console.log('Reading file from:', filePath);
-
-//     // Read the workbook
-//     let workbook = XLSX.readFile(filePath);
-
-//     // Get the first sheet
-//     const sheetName = workbook.SheetNames[0];
-//     const worksheet = workbook.Sheets[sheetName];
-
-//     // Convert sheet to JSON
-//     const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-//     let allHeaders = [];
-//     let mappedRows = [];
-
-//     // Map rows to objects with headers
-//     rows.forEach((row, index) => {
-//       if (row.length !== 0) {
-//         if (index === 0) {
-//           allHeaders = row;
-//         } else {
-//           let mappedRow = {};
-//           for (let i = 0; i < allHeaders.length; i++) {
-//             mappedRow[allHeaders[i]] = row[i];
-//           }
-//           mappedRows.push(mappedRow);
-//         }
-//       }
-//     });
-
-//     console.log('Total mapped rows:', mappedRows.length);
-
-//     // Define schema and create model
-//     const dynamicSchema = new mongoose.Schema({}, { strict: false, timestamps: true });
-//     const dynamicModel = mongoose.model(fileName, dynamicSchema);
-
-//     // Insert data in batches based on size
-//     let batch = [];
-//     let currentBatchSize = 0;
-//     let totalInserted = 0;
-
-//     for (let i = 0; i < mappedRows.length; i++) {
-//       const row = mappedRows[i];
-//       const rowSize = Buffer.byteLength(JSON.stringify(row), 'utf8');
-
-//       // If adding this row exceeds the max batch size, insert the current batch
-//       if (currentBatchSize + rowSize > MAX_BATCH_SIZE) {
-//         console.log(currentBatchSize + rowSize, "currentBatchSize + rowSize")
-//         // Insert the current batch
-//         await dynamicModel.insertMany(batch);
-//         totalInserted += batch.length;
-//         console.log(`Inserted batch of ${batch.length} records, total size: ${currentBatchSize} bytes`);
-
-//         // Reset the batch
-//         batch = [];
-//         currentBatchSize = 0;
-//       }
-
-//       // Add the row to the current batch
-//       batch.push(row);
-//       currentBatchSize += rowSize;
-//     }
-
-//     // Insert any remaining records in the last batch
-//     if (batch.length > 0) {
-//       await dynamicModel.insertMany(batch);
-//       totalInserted += batch.length;
-//       console.log(`Inserted final batch of ${batch.length} records, total size: ${currentBatchSize} bytes`);
-//     }
-
-//     res.send({ status: true, message: `Successfully processed ${totalInserted} records.` });
-//   } catch (error) {
-//     console.error('Error:', error.message);
-//     res.send({ status: false, message: error.message });
-//   }
-// });
-
+router.post('/readLargeXLS', upload.single('file'), (req, res) => {
+  const fileName = uniqueSuffix; // Assuming this is generated earlier in your code
+  processLargeExcelFile(req, res, fileName);
+});
 
 module.exports = router
 
