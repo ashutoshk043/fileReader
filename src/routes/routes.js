@@ -33,6 +33,9 @@ router.get('/', async(req, res)=>{
     res.send({status:true, message:"Connected to home"})
 })
 
+const MAX_BATCH_SIZE = 10 * 1024 * 1024; // 10MB in bytes
+
+
 router.post('/readfiles', upload.single('file'), async (req, res) => {
   try {
     let fileName = uniqueSuffix; // Assuming uniqueSuffix is defined elsewhere
@@ -43,30 +46,16 @@ router.post('/readfiles', upload.single('file'), async (req, res) => {
     // Read the workbook
     let workbook = XLSX.readFile(filePath);
 
-    // Get sheet names and log them
-    const sheetNames = workbook.SheetNames;
-    console.log('Sheet Names:', sheetNames);
-
-    if (sheetNames.length === 0) {
-      throw new Error('No sheets found in the workbook.');
-    }
-
-    // Access the first sheet
-    const sheetName = sheetNames[0];
-    console.log('Sheet Name:', sheetName);
-
+    // Get the first sheet
+    const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
-    if (!worksheet) {
-      throw new Error(`Sheet ${sheetName} not found in the workbook.`);
-    }
 
-    // Convert the sheet data to JSON
+    // Convert sheet to JSON
     const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-    console.log('Rows:', rows.length);
-
-    // Process rows
     let allHeaders = [];
     let mappedRows = [];
+
+    // Map rows to objects with headers
     rows.forEach((row, index) => {
       if (row.length !== 0) {
         if (index === 0) {
@@ -81,38 +70,146 @@ router.post('/readfiles', upload.single('file'), async (req, res) => {
       }
     });
 
-    console.log('Mapped rows total:', mappedRows.length);
-    // Define schema, create model, and insert data
+    console.log('Total mapped rows:', mappedRows.length);
+
+    const totalRows = mappedRows.length;
+    let processedRows = 0;
+
+    // Define schema and create model
     const dynamicSchema = new mongoose.Schema({}, { strict: false, timestamps: true });
     const dynamicModel = mongoose.model(fileName, dynamicSchema);
 
-    const chunkSize = 999;
+    // Insert data in batches based on size
     let batch = [];
+    let currentBatchSize = 0;
     let totalInserted = 0;
 
     for (let i = 0; i < mappedRows.length; i++) {
-      batch.push(mappedRows[i]);
+      const row = mappedRows[i];
+      const rowSize = Buffer.byteLength(JSON.stringify(row), 'utf8');
 
-      if (batch.length === chunkSize || i === mappedRows.length - 1) {
-        console.log(`Inserting batch of size: ${batch.length}`);
-        try {
-          await dynamicModel.insertMany(batch);
-          totalInserted += batch.length;
-          console.log(`Successfully inserted ${batch.length} records.`);
-          batch = []; // Clear batch
-        } catch (error) {
-          console.error('Error inserting batch:', error.message);
-        }
+      // If adding this row exceeds the max batch size, insert the current batch
+      if (currentBatchSize + rowSize > MAX_BATCH_SIZE) {
+        // Insert the current batch
+        await dynamicModel.insertMany(batch);
+        totalInserted += batch.length;
+        console.log(`Inserted batch of ${batch.length} records, total size: ${currentBatchSize} bytes`);
+
+        // Reset the batch
+        batch = [];
+        currentBatchSize = 0;
       }
+
+      // Add the row to the current batch
+      batch.push(row);
+      currentBatchSize += rowSize;
+      processedRows++;
+
+      // Calculate progress
+      const progress = Math.round((processedRows / totalRows) * 100);
+      console.log(`Progress: ${progress}%`);
+
+      // Update progress to the client
+      res.write(`Processing: ${progress}%\n`); // Send string, not object
     }
 
-    res.send({ status: true, message: `Successfully processed ${totalInserted} records.` });
+    // Insert any remaining records in the last batch
+    if (batch.length > 0) {
+      await dynamicModel.insertMany(batch);
+      totalInserted += batch.length;
+      console.log(`Inserted final batch of ${batch.length} records, total size: ${currentBatchSize} bytes`);
+    }
+
+    res.write(`Processing: 100%\n`); // Final progress update
+    res.end(JSON.stringify({ status: true, message: `Successfully processed ${totalInserted} records.` }));
   } catch (error) {
     console.error('Error:', error.message);
-    res.send({ status: false, message: error.message });
+    res.write(JSON.stringify({ status: false, message: error.message }));
+    res.end(); // Ensure the response ends after an error
   }
 });
 
+
+// router.post('/readfiles', upload.single('file'), async (req, res) => {
+//   try {
+//     let fileName = uniqueSuffix; // Assuming uniqueSuffix is defined elsewhere
+//     const filePath = path.join(uploadFolder, fileName);
+
+//     console.log('Reading file from:', filePath);
+
+//     // Read the workbook
+//     let workbook = XLSX.readFile(filePath);
+
+//     // Get the first sheet
+//     const sheetName = workbook.SheetNames[0];
+//     const worksheet = workbook.Sheets[sheetName];
+
+//     // Convert sheet to JSON
+//     const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+//     let allHeaders = [];
+//     let mappedRows = [];
+
+//     // Map rows to objects with headers
+//     rows.forEach((row, index) => {
+//       if (row.length !== 0) {
+//         if (index === 0) {
+//           allHeaders = row;
+//         } else {
+//           let mappedRow = {};
+//           for (let i = 0; i < allHeaders.length; i++) {
+//             mappedRow[allHeaders[i]] = row[i];
+//           }
+//           mappedRows.push(mappedRow);
+//         }
+//       }
+//     });
+
+//     console.log('Total mapped rows:', mappedRows.length);
+
+//     // Define schema and create model
+//     const dynamicSchema = new mongoose.Schema({}, { strict: false, timestamps: true });
+//     const dynamicModel = mongoose.model(fileName, dynamicSchema);
+
+//     // Insert data in batches based on size
+//     let batch = [];
+//     let currentBatchSize = 0;
+//     let totalInserted = 0;
+
+//     for (let i = 0; i < mappedRows.length; i++) {
+//       const row = mappedRows[i];
+//       const rowSize = Buffer.byteLength(JSON.stringify(row), 'utf8');
+
+//       // If adding this row exceeds the max batch size, insert the current batch
+//       if (currentBatchSize + rowSize > MAX_BATCH_SIZE) {
+//         console.log(currentBatchSize + rowSize, "currentBatchSize + rowSize")
+//         // Insert the current batch
+//         await dynamicModel.insertMany(batch);
+//         totalInserted += batch.length;
+//         console.log(`Inserted batch of ${batch.length} records, total size: ${currentBatchSize} bytes`);
+
+//         // Reset the batch
+//         batch = [];
+//         currentBatchSize = 0;
+//       }
+
+//       // Add the row to the current batch
+//       batch.push(row);
+//       currentBatchSize += rowSize;
+//     }
+
+//     // Insert any remaining records in the last batch
+//     if (batch.length > 0) {
+//       await dynamicModel.insertMany(batch);
+//       totalInserted += batch.length;
+//       console.log(`Inserted final batch of ${batch.length} records, total size: ${currentBatchSize} bytes`);
+//     }
+
+//     res.send({ status: true, message: `Successfully processed ${totalInserted} records.` });
+//   } catch (error) {
+//     console.error('Error:', error.message);
+//     res.send({ status: false, message: error.message });
+//   }
+// });
 
 
 module.exports = router
